@@ -1,0 +1,351 @@
+import { useState, useEffect, useRef } from "react";
+
+const WORKOUT = [
+  {
+    name: "GOBLET SQUAT",
+    sets: 3, reps: 12, rest: 90,
+    muscle: "LEGS",
+    note: "Light. Feel the pattern.",
+    cues: [
+      "Hold dumbbell vertically at chest, elbows pointing down",
+      "Feet shoulder-width, toes slightly out",
+      "Sit between your heels — chest stays tall throughout",
+      "Drive knees out and push the floor away to stand",
+    ],
+    video: "https://www.youtube.com/results?search_query=alan+thrall+goblet+squat",
+    videoLabel: "Alan Thrall — Goblet Squat",
+  },
+  {
+    name: "DB ROMANIAN DEADLIFT",
+    sets: 3, reps: 10, rest: 90,
+    muscle: "POSTERIOR CHAIN",
+    note: "Hinge from hips, soft knees.",
+    cues: [
+      "Soft, fixed bend in knees — they don't move",
+      "Push hips back (not down) — like closing a car door with your hips",
+      "Dumbbells drag close to your legs all the way down",
+      "Feel the hamstring stretch, then drive hips forward to stand",
+    ],
+    video: "https://www.youtube.com/results?search_query=jeff+nippard+romanian+deadlift+form",
+    videoLabel: "Jeff Nippard — Romanian Deadlift",
+  },
+  {
+    name: "DB BENCH PRESS",
+    sets: 3, reps: 12, rest: 90,
+    muscle: "CHEST",
+    note: null,
+    cues: [
+      "Shoulder blades pinched and pressed into the bench",
+      "Lower dumbbells to chest — elbows at ~45°, not flared wide",
+      "Press up and slightly inward, don't fully lock out",
+      "Control the descent — never drop the weight",
+    ],
+    video: "https://www.youtube.com/results?search_query=renaissance+periodization+dumbbell+bench+press+form",
+    videoLabel: "RP — Dumbbell Bench Press",
+  },
+  {
+    name: "CABLE SEATED ROW",
+    sets: 3, reps: 12, rest: 60,
+    muscle: "BACK",
+    note: null,
+    cues: [
+      "Sit tall, chest proud — don't round forward to reach",
+      "Drive elbows back past your torso",
+      "Squeeze shoulder blades together at the finish",
+      "Full stretch at the front — let scapulae protract before each rep",
+    ],
+    video: "https://www.youtube.com/results?search_query=mind+pump+seated+cable+row+form",
+    videoLabel: "Mind Pump — Seated Cable Row",
+  },
+  {
+    name: "LAT PULLDOWN",
+    sets: 3, reps: 12, rest: 60,
+    muscle: "BACK",
+    note: null,
+    cues: [
+      "Slight lean back (15–20°), chest up toward the bar",
+      "Pull bar to upper chest — lead with elbows, not hands",
+      "Don't lean further back as you pull — that becomes a row",
+      "Controlled return — feel the lats fully stretch at the top",
+    ],
+    video: "https://www.youtube.com/results?search_query=jeff+nippard+lat+pulldown+form",
+    videoLabel: "Jeff Nippard — Lat Pulldown",
+  },
+  {
+    name: "DB LATERAL RAISE",
+    sets: 3, reps: 15, rest: 60,
+    muscle: "SHOULDERS",
+    note: "Light. Feel the lateral delt.",
+    cues: [
+      "Slight forward lean at hips, soft bend in elbows",
+      "Raise to shoulder height — no higher",
+      "Lead with your elbows, not wrists (think: pouring a jug)",
+      "Lower slowly — the descent is where the muscle actually works",
+    ],
+    video: "https://www.youtube.com/results?search_query=mike+israetel+lateral+raise+form",
+    videoLabel: "Mike Israetel — Lateral Raise",
+  },
+  {
+    name: "FACE PULL (CABLE)",
+    sets: 3, reps: 15, rest: 60,
+    muscle: "SHOULDERS",
+    note: "External rotation. Controlled.",
+    cues: [
+      "Set cable at forehead height or above",
+      "Pull toward your face, hands finishing beside your ears",
+      "Rotate externally — thumbs finish pointing behind you",
+      "Elbows stay high throughout the entire movement",
+    ],
+    video: "https://www.youtube.com/results?search_query=jeff+cavaliere+athlean+face+pull+form",
+    videoLabel: "Jeff Cavaliere — Face Pull",
+  },
+];
+
+const FONTS = `
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;500;600;700;900&family=IBM+Plex+Mono:wght@400;500&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #0A0A0A; }
+  .cue-enter { animation: fadeDown 0.2s ease; }
+  @keyframes fadeDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+`;
+
+const C = {
+  bg: "#0A0A0A", surface: "#141414", surface2: "#181818",
+  border: "#222", accent: "#C97A0A", accentDim: "#6B4206",
+  text: "#E8E4DC", muted: "#555",
+  mono: "'IBM Plex Mono', monospace", sans: "'Barlow Condensed', sans-serif",
+};
+
+const Btn = ({ children, onClick, variant = "primary", style = {} }) => (
+  <button onClick={onClick} style={{
+    width: "100%", cursor: "pointer", padding: "20px 0",
+    fontSize: 22, fontWeight: 900, fontFamily: C.sans, letterSpacing: 2,
+    background: variant === "primary" ? C.accent : "transparent",
+    color: variant === "primary" ? "#0A0A0A" : C.muted,
+    border: variant !== "primary" ? `1px solid ${C.border}` : "none",
+    ...style,
+  }}>{children}</button>
+);
+
+export default function App() {
+  const [phase, setPhase] = useState("start");
+  const [exIdx, setExIdx] = useState(0);
+  const [setIdx, setSetIdx] = useState(0);
+  const [restTime, setRestTime] = useState(0);
+  const [restTotal, setRestTotal] = useState(0);
+  const [showForm, setShowForm] = useState(false);
+  const timerRef = useRef(null);
+  const current = WORKOUT[exIdx];
+
+  useEffect(() => {
+    if (phase !== "rest") return;
+    timerRef.current = setInterval(() => setRestTime(t => Math.max(0, t - 1)), 1000);
+    return () => clearInterval(timerRef.current);
+  }, [phase, exIdx, setIdx]);
+
+  useEffect(() => {
+    if (phase === "rest" && restTime === 0 && restTotal > 0) advance();
+  }, [restTime]);
+
+  useEffect(() => { setShowForm(false); }, [exIdx]);
+
+  const advance = () => {
+    clearInterval(timerRef.current);
+    if (setIdx + 1 < current.sets) { setSetIdx(s => s + 1); setPhase("exercise"); }
+    else if (exIdx + 1 < WORKOUT.length) { setExIdx(e => e + 1); setSetIdx(0); setPhase("exercise"); }
+    else setPhase("complete");
+  };
+
+  const completeSet = () => {
+    const r = current.rest;
+    setRestTotal(r); setRestTime(r); setPhase("rest");
+  };
+
+  const reset = () => { setPhase("start"); setExIdx(0); setSetIdx(0); setRestTime(0); setRestTotal(0); setShowForm(false); };
+
+  const circumference = 2 * Math.PI * 88;
+  const restPct = restTotal > 0 ? (restTime / restTotal) * 100 : 0;
+
+  const wrap = (children) => (
+    <div style={{ background: C.bg, minHeight: "100dvh", color: C.text, fontFamily: C.sans, maxWidth: 430, margin: "0 auto", padding: "0 24px 64px" }}>
+      <style>{FONTS}</style>
+      {children}
+    </div>
+  );
+
+  if (phase === "start") return wrap(
+    <div style={{ paddingTop: 64 }}>
+      <div style={{ color: C.accent, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 20 }}>SIGNAL CULT / PHASE 1</div>
+      <h1 style={{ fontSize: 80, fontWeight: 900, lineHeight: 0.88, marginBottom: 8 }}>FULL<br />BODY</h1>
+      <div style={{ color: C.muted, fontSize: 18, marginBottom: 48, fontWeight: 500 }}>MON · WED · FRI</div>
+      <div style={{ borderTop: `1px solid ${C.border}`, marginBottom: 40 }}>
+        {WORKOUT.map((ex, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 0", borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 17, fontWeight: 700 }}>{ex.name}</span>
+            <span style={{ color: C.muted, fontFamily: C.mono, fontSize: 13 }}>{ex.sets}×{ex.reps}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: "16px 20px", marginBottom: 32, display: "flex", gap: 14, alignItems: "flex-start" }}>
+        <div style={{ color: C.accent, fontSize: 20, marginTop: 3 }}>→</div>
+        <div>
+          <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: 3, color: C.muted, marginBottom: 4 }}>WEEKS 1–2</div>
+          <div style={{ fontSize: 15, color: C.text, lineHeight: 1.5 }}>Go embarrassingly light. Complete all 21 sets with clean form.</div>
+        </div>
+      </div>
+      <Btn onClick={() => setPhase("warmup")}>BEGIN SESSION</Btn>
+    </div>
+  );
+
+  if (phase === "warmup") return wrap(
+    <div style={{ paddingTop: 64 }}>
+      <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 48 }}>BEFORE YOU LIFT</div>
+      <h1 style={{ fontSize: 72, fontWeight: 900, lineHeight: 0.88, marginBottom: 32 }}>WARM<br />UP</h1>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: "28px 24px", marginBottom: 48 }}>
+        <div style={{ fontFamily: C.mono, fontSize: 36, fontWeight: 500, marginBottom: 12 }}>10 MIN</div>
+        <div style={{ color: C.muted, fontSize: 17, lineHeight: 1.5 }}>Treadmill walk at 5.5–6 km/h or stationary bike. Easy pace — priming, not training.</div>
+      </div>
+      <Btn onClick={() => setPhase("exercise")}>WARMUP DONE</Btn>
+    </div>
+  );
+
+  if (phase === "rest") {
+    const mins = Math.floor(restTime / 60);
+    const secs = restTime % 60;
+    const display = mins > 0 ? `${mins}:${String(secs).padStart(2, "0")}` : `${restTime}`;
+    const nextLabel = (() => {
+      if (setIdx + 1 < current.sets) return `SET ${setIdx + 2} OF ${current.sets} — ${current.reps} REPS`;
+      if (exIdx + 1 < WORKOUT.length) return WORKOUT[exIdx + 1].name;
+      return "LAST SET DONE";
+    })();
+    return wrap(
+      <div style={{ paddingTop: 64, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 12 }}>REST</div>
+        <div style={{ color: C.text, fontSize: 20, fontWeight: 700, marginBottom: 40 }}>{current.name}</div>
+        <div style={{ position: "relative", width: 200, height: 200, marginBottom: 40 }}>
+          <svg width="200" height="200" style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }}>
+            <circle cx="100" cy="100" r="88" fill="none" stroke={C.border} strokeWidth="5" />
+            <circle cx="100" cy="100" r="88" fill="none" stroke={C.accent} strokeWidth="5"
+              strokeDasharray={circumference}
+              strokeDashoffset={circumference * (1 - restPct / 100)}
+              style={{ transition: "stroke-dashoffset 1s linear" }}
+            />
+          </svg>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <span style={{ fontFamily: C.mono, fontSize: 52, fontWeight: 500 }}>{display}</span>
+          </div>
+        </div>
+        <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 4, marginBottom: 8 }}>NEXT UP</div>
+        <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 56, textAlign: "center", letterSpacing: 1 }}>{nextLabel}</div>
+        <Btn onClick={advance} variant="ghost" style={{ width: "auto", padding: "14px 48px", fontSize: 15 }}>SKIP REST</Btn>
+      </div>
+    );
+  }
+
+  if (phase === "complete") return wrap(
+    <div style={{ paddingTop: 80, textAlign: "center" }}>
+      <div style={{ color: C.accent, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 20 }}>SESSION COMPLETE</div>
+      <h1 style={{ fontSize: 80, fontWeight: 900, lineHeight: 0.88, marginBottom: 24 }}>DONE.<br />GET OUT.</h1>
+      <div style={{ color: C.muted, fontSize: 20, marginBottom: 80 }}>21 sets. Rest. Eat your protein.</div>
+      <Btn onClick={reset} variant="ghost">BACK TO PROGRAM</Btn>
+    </div>
+  );
+
+  // ── EXERCISE ───────────────────────────────────────────────────────────────
+  const sessionProgress = ((exIdx * 3 + setIdx) / (WORKOUT.length * 3)) * 100;
+
+  return wrap(
+    <>
+      <div style={{ position: "fixed", top: 0, left: 0, right: 0, height: 3, background: C.border, zIndex: 10 }}>
+        <div style={{ height: "100%", background: C.accent, width: `${sessionProgress}%`, transition: "width 0.4s ease" }} />
+      </div>
+
+      <div style={{ paddingTop: 56 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 32 }}>
+          <span style={{ color: C.muted, fontFamily: C.mono, fontSize: 11, letterSpacing: 3 }}>{exIdx + 1} / {WORKOUT.length}</span>
+          <span style={{ color: C.accent, fontFamily: C.mono, fontSize: 11, letterSpacing: 3 }}>{current.muscle}</span>
+        </div>
+
+        <div style={{ marginBottom: 28 }}>
+          <h1 style={{ fontSize: current.name.length > 14 ? 40 : current.name.length > 10 ? 52 : 64, fontWeight: 900, lineHeight: 0.92, marginBottom: current.note ? 10 : 0 }}>
+            {current.name}
+          </h1>
+          {current.note && <div style={{ color: C.muted, fontSize: 15, fontStyle: "italic" }}>{current.note}</div>}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+          {Array.from({ length: current.sets }).map((_, i) => (
+            <div key={i} style={{
+              width: 52, height: 52, borderRadius: "50%",
+              background: i < setIdx ? C.accent : "transparent",
+              border: `2px solid ${i < setIdx ? C.accent : i === setIdx ? C.text : C.border}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: C.mono, fontSize: 15, fontWeight: 500,
+              color: i < setIdx ? "#0A0A0A" : i === setIdx ? C.text : C.muted,
+              transition: "all 0.2s",
+            }}>
+              {i < setIdx ? "✓" : i + 1}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: "24px", marginBottom: 12 }}>
+          <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 4, marginBottom: 10 }}>SET {setIdx + 1} OF {current.sets}</div>
+          <div style={{ fontFamily: C.mono, fontSize: 64, fontWeight: 500, lineHeight: 1 }}>{current.reps}</div>
+          <div style={{ color: C.muted, fontSize: 18, fontWeight: 600, marginTop: 4 }}>REPS</div>
+        </div>
+
+        <button
+          onClick={() => setShowForm(f => !f)}
+          style={{
+            width: "100%", background: "transparent", cursor: "pointer",
+            border: `1px solid ${showForm ? C.accentDim : C.border}`,
+            borderBottom: showForm ? "none" : `1px solid ${showForm ? C.accentDim : C.border}`,
+            color: showForm ? C.accent : C.muted,
+            padding: "13px 0", fontSize: 15, fontWeight: 700,
+            fontFamily: C.sans, letterSpacing: 2,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          }}
+        >
+          <span style={{ fontSize: 11 }}>{showForm ? "▲" : "▼"}</span> FORM CUES + VIDEO
+        </button>
+
+        {showForm && (
+          <div className="cue-enter" style={{
+            background: C.surface2, border: `1px solid ${C.accentDim}`,
+            borderTop: "none", padding: "20px 20px 16px", marginBottom: 0,
+          }}>
+            {current.cues.map((cue, i) => (
+              <div key={i} style={{ display: "flex", gap: 12, marginBottom: 14, alignItems: "flex-start" }}>
+                <span style={{ color: C.accent, fontFamily: C.mono, fontSize: 11, marginTop: 2, flexShrink: 0 }}>{i + 1}.</span>
+                <span style={{ fontSize: 15, lineHeight: 1.5, color: C.text }}>{cue}</span>
+              </div>
+            ))}
+            <a
+              href={current.video}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: "flex", alignItems: "center", gap: 12, marginTop: 8,
+                background: "#160900", border: `1px solid ${C.accentDim}`,
+                padding: "14px 16px", textDecoration: "none",
+                color: C.accent, fontSize: 15, fontWeight: 700, letterSpacing: 1,
+              }}
+            >
+              <span style={{ fontSize: 16 }}>▶</span>
+              <span>{current.videoLabel}</span>
+            </a>
+          </div>
+        )}
+
+        <div style={{ height: 16 }} />
+
+        <Btn onClick={completeSet}>SET DONE</Btn>
+
+        <div style={{ textAlign: "center", marginTop: 14, color: C.muted, fontFamily: C.mono, fontSize: 11, letterSpacing: 2 }}>
+          {current.rest}s REST FOLLOWS
+        </div>
+      </div>
+    </>
+  );
+}
