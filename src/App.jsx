@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const WORKOUT = [
   {
@@ -101,12 +101,16 @@ const WORKOUT = [
   },
 ];
 
+const TOTAL_SETS = WORKOUT.reduce((sum, ex) => sum + ex.sets, 0);
+
 const FONTS = `
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;500;600;700;900&family=IBM+Plex+Mono:wght@400;500&display=swap');
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body { background: #0A0A0A; }
   .cue-enter { animation: fadeDown 0.2s ease; }
   @keyframes fadeDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
 `;
 
 const C = {
@@ -115,6 +119,24 @@ const C = {
   text: "#E8E4DC", muted: "#555",
   mono: "'IBM Plex Mono', monospace", sans: "'Barlow Condensed', sans-serif",
 };
+
+function getLastWeight(history, name) {
+  for (let i = history.sessions.length - 1; i >= 0; i--) {
+    const sets = history.sessions[i].exercises?.[name];
+    if (sets?.length) return sets[sets.length - 1].weight;
+  }
+  return null;
+}
+
+function getPR(history, name) {
+  let pr = null;
+  for (const session of history.sessions) {
+    for (const set of session.exercises?.[name] ?? []) {
+      if (pr === null || set.weight > pr) pr = set.weight;
+    }
+  }
+  return pr;
+}
 
 const Btn = ({ children, onClick, variant = "primary", style = {} }) => (
   <button onClick={onClick} style={{
@@ -134,34 +156,102 @@ export default function App() {
   const [restTime, setRestTime] = useState(0);
   const [restTotal, setRestTotal] = useState(0);
   const [showForm, setShowForm] = useState(false);
+  const [history, setHistory] = useState(() => {
+    try {
+      const raw = localStorage.getItem("gym_history");
+      return raw ? JSON.parse(raw) : { sessions: [] };
+    } catch {
+      return { sessions: [] };
+    }
+  });
+  const [currentSession, setCurrentSession] = useState({});
+  const [weightInput, setWeightInput] = useState(0);
   const timerRef = useRef(null);
   const current = WORKOUT[exIdx];
 
-  useEffect(() => {
-    if (phase !== "rest") return;
-    timerRef.current = setInterval(() => setRestTime(t => Math.max(0, t - 1)), 1000);
-    return () => clearInterval(timerRef.current);
-  }, [phase, exIdx, setIdx]);
-
-  useEffect(() => {
-    if (phase === "rest" && restTime === 0 && restTotal > 0) advance();
-  }, [restTime]);
-
-  useEffect(() => { setShowForm(false); }, [exIdx]);
-
-  const advance = () => {
-    clearInterval(timerRef.current);
-    if (setIdx + 1 < current.sets) { setSetIdx(s => s + 1); setPhase("exercise"); }
-    else if (exIdx + 1 < WORKOUT.length) { setExIdx(e => e + 1); setSetIdx(0); setPhase("exercise"); }
-    else setPhase("complete");
+  const persistHistory = (h) => {
+    setHistory(h);
+    localStorage.setItem("gym_history", JSON.stringify(h));
   };
 
+  const advance = useCallback(() => {
+    clearInterval(timerRef.current);
+    if (setIdx + 1 < current.sets) { setSetIdx(s => s + 1); setPhase("exercise"); }
+    else if (exIdx + 1 < WORKOUT.length) { setExIdx(e => e + 1); setSetIdx(0); setPhase("exercise"); setShowForm(false); }
+    else setPhase("complete");
+  }, [setIdx, exIdx, current.sets]);
+
+  useEffect(() => {
+    if (phase !== "rest") return;
+    let remaining = restTotal;
+    timerRef.current = setInterval(() => {
+      remaining = Math.max(0, remaining - 1);
+      setRestTime(remaining);
+      if (remaining === 0) {
+        clearInterval(timerRef.current);
+        advance();
+      }
+    }, 1000);
+    return () => clearInterval(timerRef.current);
+  }, [phase, exIdx, setIdx, restTotal, advance]);
+
   const completeSet = () => {
+    setWeightInput(getLastWeight(history, current.name) ?? 0);
+    setPhase("weight");
+  };
+
+  const logSetAndRest = () => {
+    setCurrentSession(prev => ({
+      ...prev,
+      [current.name]: [
+        ...(prev[current.name] ?? []),
+        { set: setIdx + 1, weight: weightInput, reps: current.reps },
+      ],
+    }));
     const r = current.rest;
     setRestTotal(r); setRestTime(r); setPhase("rest");
   };
 
-  const reset = () => { setPhase("start"); setExIdx(0); setSetIdx(0); setRestTime(0); setRestTotal(0); setShowForm(false); };
+  const reset = () => {
+    if (Object.keys(currentSession).length > 0) {
+      const now = new Date();
+      persistHistory({
+        sessions: [...history.sessions, {
+          id: now.toISOString(),
+          date: now.toISOString().slice(0, 10),
+          exercises: currentSession,
+        }],
+      });
+    }
+    setCurrentSession({});
+    setWeightInput(0);
+    setPhase("start"); setExIdx(0); setSetIdx(0);
+    setRestTime(0); setRestTotal(0); setShowForm(false);
+  };
+
+  const exportHistory = () => {
+    const blob = new Blob([JSON.stringify(history, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `gym-history-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const importHistory = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!Array.isArray(parsed?.sessions)) { alert("Invalid history file."); return; }
+        if (window.confirm("Replace current history with imported data?")) persistHistory(parsed);
+      } catch { alert("Could not read file."); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   const circumference = 2 * Math.PI * 88;
   const restPct = restTotal > 0 ? (restTime / restTotal) * 100 : 0;
@@ -174,7 +264,31 @@ export default function App() {
   );
 
   if (phase === "start") return wrap(
-    <div style={{ paddingTop: 64 }}>
+    <div style={{ paddingTop: 64, position: "relative" }}>
+      <div style={{ position: "absolute", top: 0, right: 0, display: "flex", gap: 8 }}>
+        <button
+          onClick={exportHistory}
+          title="Export history"
+          style={{
+            background: "transparent", border: `1px solid ${C.border}`,
+            color: C.muted, cursor: "pointer",
+            fontFamily: C.mono, fontSize: 10, letterSpacing: 2,
+            padding: "6px 10px",
+          }}
+        >↓ EXPORT</button>
+        <label
+          htmlFor="import-file"
+          title="Import history"
+          style={{
+            background: "transparent", border: `1px solid ${C.border}`,
+            color: C.muted, cursor: "pointer",
+            fontFamily: C.mono, fontSize: 10, letterSpacing: 2,
+            padding: "6px 10px", display: "inline-block",
+          }}
+        >↑ IMPORT</label>
+        <input id="import-file" type="file" accept=".json" onChange={importHistory} style={{ display: "none" }} />
+      </div>
+
       <div style={{ color: C.accent, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 20 }}>SIGNAL CULT / PHASE 1</div>
       <h1 style={{ fontSize: 80, fontWeight: 900, lineHeight: 0.88, marginBottom: 8 }}>FULL<br />BODY</h1>
       <div style={{ color: C.muted, fontSize: 18, marginBottom: 48, fontWeight: 500 }}>MON · WED · FRI</div>
@@ -208,6 +322,68 @@ export default function App() {
       <Btn onClick={() => setPhase("exercise")}>WARMUP DONE</Btn>
     </div>
   );
+
+  if (phase === "weight") {
+    const stepWeight = (delta) => setWeightInput(w => Math.max(0, w + delta));
+    const stepBtnStyle = {
+      width: 52, height: 52, borderRadius: "50%",
+      background: "transparent", border: `2px solid ${C.border}`,
+      color: C.muted, cursor: "pointer",
+      fontFamily: C.mono, fontSize: 20, fontWeight: 500,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0,
+    };
+    return wrap(
+      <div style={{ paddingTop: 64, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 12 }}>WEIGHT LOGGED</div>
+        <div style={{ color: C.text, fontSize: 20, fontWeight: 700, marginBottom: 4 }}>{current.name}</div>
+        <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 4, marginBottom: 48 }}>
+          SET {setIdx + 1} OF {current.sets}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 16 }}>
+          <button style={stepBtnStyle} onClick={() => stepWeight(-2)}>−</button>
+          <div style={{ fontFamily: C.mono, fontSize: 80, fontWeight: 500, lineHeight: 1, minWidth: 120, textAlign: "center" }}>
+            {weightInput}
+          </div>
+          <button style={stepBtnStyle} onClick={() => stepWeight(2)}>+</button>
+        </div>
+
+        <div style={{ fontFamily: C.mono, fontSize: 11, letterSpacing: 4, color: C.muted, marginBottom: 32 }}>KG</div>
+
+        <input
+          type="number"
+          value={weightInput}
+          min={0}
+          onChange={e => setWeightInput(Math.max(0, Number(e.target.value) || 0))}
+          onBlur={e => setWeightInput(Math.max(0, Number(e.target.value) || 0))}
+          style={{
+            fontFamily: C.mono, fontSize: 28, fontWeight: 500,
+            background: C.surface, border: `1px solid ${C.border}`,
+            color: C.text, textAlign: "center",
+            padding: "12px 0", width: 120, marginBottom: 48,
+            MozAppearance: "textfield",
+          }}
+        />
+
+        <div style={{ width: "100%" }}>
+          <Btn onClick={logSetAndRest}>LOG SET</Btn>
+        </div>
+
+        <button
+          onClick={() => { setWeightInput(0); logSetAndRest(); }}
+          style={{
+            background: "transparent", border: "none",
+            color: C.muted, cursor: "pointer",
+            fontFamily: C.mono, fontSize: 11, letterSpacing: 2,
+            marginTop: 16, padding: "8px 0",
+          }}
+        >
+          SKIP — LOG 0 KG
+        </button>
+      </div>
+    );
+  }
 
   if (phase === "rest") {
     const mins = Math.floor(restTime / 60);
@@ -252,7 +428,11 @@ export default function App() {
   );
 
   // ── EXERCISE ───────────────────────────────────────────────────────────────
-  const sessionProgress = ((exIdx * 3 + setIdx) / (WORKOUT.length * 3)) * 100;
+  const completedSets = WORKOUT.slice(0, exIdx).reduce((s, ex) => s + ex.sets, 0) + setIdx;
+  const sessionProgress = (completedSets / TOTAL_SETS) * 100;
+
+  const last = getLastWeight(history, current.name);
+  const pr   = getPR(history, current.name);
 
   return wrap(
     <>
@@ -266,11 +446,34 @@ export default function App() {
           <span style={{ color: C.accent, fontFamily: C.mono, fontSize: 11, letterSpacing: 3 }}>{current.muscle}</span>
         </div>
 
-        <div style={{ marginBottom: 28 }}>
+        <div style={{ marginBottom: 16 }}>
           <h1 style={{ fontSize: current.name.length > 14 ? 40 : current.name.length > 10 ? 52 : 64, fontWeight: 900, lineHeight: 0.92, marginBottom: current.note ? 10 : 0 }}>
             {current.name}
           </h1>
           {current.note && <div style={{ color: C.muted, fontSize: 15, fontStyle: "italic" }}>{current.note}</div>}
+        </div>
+
+        <div style={{ display: "flex", border: `1px solid ${C.border}`, marginBottom: 20 }}>
+          {[
+            { label: "LAST", value: last !== null ? String(last) : "—", unit: last !== null },
+            { label: "PR",   value: pr   !== null ? String(pr)   : "—", unit: pr   !== null },
+            { label: "TARGET", value: pr !== null ? String(pr + 2) : "—", unit: pr !== null, accent: true },
+          ].map((col, i) => (
+            <div key={i} style={{
+              flex: 1, padding: "10px 0", textAlign: "center",
+              borderRight: i < 2 ? `1px solid ${C.border}` : "none",
+            }}>
+              <div style={{ fontFamily: C.mono, fontSize: 9, letterSpacing: 4, color: C.muted, marginBottom: 4 }}>
+                {col.label}
+              </div>
+              <div style={{ fontFamily: C.mono, fontSize: 22, fontWeight: 500, color: col.accent ? C.accent : C.text }}>
+                {col.value}
+              </div>
+              {col.unit && (
+                <div style={{ fontFamily: C.mono, fontSize: 9, color: C.muted }}>KG</div>
+              )}
+            </div>
+          ))}
         </div>
 
         <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
