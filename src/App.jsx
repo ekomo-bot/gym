@@ -183,6 +183,8 @@ export default function App() {
       return { sessions: [] };
     }
   });
+  const [workoutList, setWorkoutList] = useState([...WORKOUT]);
+  const [reorderMode, setReorderMode] = useState(false);
   const [currentSession, setCurrentSession] = useState({});
   const [weightInput, setWeightInput] = useState(0);
   const [workingWeights, setWorkingWeights] = useState(() => {
@@ -201,7 +203,15 @@ export default function App() {
     }
   });
   const timerRef = useRef(null);
-  const current = WORKOUT[exIdx];
+  const current = workoutList[exIdx];
+
+  const moveExercise = (fromIdx, direction) => {
+    const toIdx = fromIdx + direction;
+    if (toIdx <= exIdx || toIdx >= workoutList.length) return;
+    const newList = [...workoutList];
+    [newList[fromIdx], newList[toIdx]] = [newList[toIdx], newList[fromIdx]];
+    setWorkoutList(newList);
+  };
 
   const persistHistory = (h) => {
     setHistory(h);
@@ -275,6 +285,8 @@ export default function App() {
     }
     setCurrentSession({});
     setWeightInput(0);
+    setWorkoutList([...WORKOUT]);
+    setReorderMode(false);
     setPhase("start"); setExIdx(0); setSetIdx(0);
     setRestTime(0); setRestTotal(0); setShowForm(false);
   };
@@ -306,9 +318,59 @@ export default function App() {
   const circumference = 2 * Math.PI * 88;
   const restPct = restTotal > 0 ? (restTime / restTotal) * 100 : 0;
 
+  const ReorderOverlay = () => {
+    const upcoming = workoutList.slice(exIdx + 1);
+    const startIdx = exIdx + 1;
+    const rowBtn = (label, onClick, disabled) => (
+      <button onClick={onClick} disabled={disabled} style={{
+        width: 36, height: 36, background: "transparent",
+        border: `1px solid ${disabled ? C.border : C.muted}`,
+        color: disabled ? C.border : C.muted,
+        fontFamily: C.mono, fontSize: 14, cursor: disabled ? "default" : "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>{label}</button>
+    );
+    return (
+      <div style={{
+        position: "fixed", inset: 0, background: C.bg, zIndex: 100,
+        overflowY: "auto", maxWidth: 430, margin: "0 auto", padding: "64px 24px 48px",
+      }}>
+        <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 8 }}>UPCOMING</div>
+        <h2 style={{ fontSize: 48, fontWeight: 900, lineHeight: 0.9, marginBottom: 32 }}>REORDER</h2>
+        {upcoming.length === 0
+          ? <div style={{ color: C.muted, fontSize: 16, marginBottom: 32 }}>No upcoming exercises.</div>
+          : (
+            <div style={{ borderTop: `1px solid ${C.border}`, marginBottom: 32 }}>
+              {upcoming.map((ex, i) => {
+                const abs = startIdx + i;
+                return (
+                  <div key={ex.id} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "14px 0", borderBottom: `1px solid ${C.border}`,
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700 }}>{ex.name}</div>
+                      <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 11 }}>{ex.sets}×{ex.reps}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {rowBtn("↑", () => moveExercise(abs, -1), i === 0)}
+                      {rowBtn("↓", () => moveExercise(abs, 1), i === upcoming.length - 1)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        }
+        <Btn onClick={() => setReorderMode(false)}>DONE</Btn>
+      </div>
+    );
+  };
+
   const wrap = (children) => (
     <div style={{ background: C.bg, minHeight: "100dvh", color: C.text, fontFamily: C.sans, maxWidth: 430, margin: "0 auto", padding: "0 24px 64px" }}>
       <style>{FONTS}</style>
+      {reorderMode && <ReorderOverlay />}
       {children}
     </div>
   );
@@ -441,7 +503,7 @@ export default function App() {
     const display = mins > 0 ? `${mins}:${String(secs).padStart(2, "0")}` : `${restTime}`;
     const nextLabel = (() => {
       if (setIdx + 1 < current.sets) return `SET ${setIdx + 2} OF ${current.sets} — ${current.reps} REPS`;
-      if (exIdx + 1 < WORKOUT.length) return WORKOUT[exIdx + 1].name;
+      if (exIdx + 1 < workoutList.length) return workoutList[exIdx + 1].name;
       return "LAST SET DONE";
     })();
     return wrap(
@@ -464,6 +526,10 @@ export default function App() {
         <div style={{ color: C.muted, fontFamily: C.mono, fontSize: 10, letterSpacing: 4, marginBottom: 8 }}>NEXT UP</div>
         <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 56, textAlign: "center", letterSpacing: 1 }}>{nextLabel}</div>
         <Btn onClick={advance} variant="ghost" style={{ width: "auto", padding: "14px 48px", fontSize: 15 }}>SKIP REST</Btn>
+        <button onClick={() => setReorderMode(true)} style={{
+          background: "transparent", border: "none", color: C.muted, cursor: "pointer",
+          fontFamily: C.mono, fontSize: 10, letterSpacing: 2, marginTop: 24, padding: 0,
+        }}>↕ REORDER</button>
       </div>
     );
   }
@@ -478,7 +544,7 @@ export default function App() {
   );
 
   // ── EXERCISE ───────────────────────────────────────────────────────────────
-  const completedSets = WORKOUT.slice(0, exIdx).reduce((s, ex) => s + ex.sets, 0) + setIdx;
+  const completedSets = workoutList.slice(0, exIdx).reduce((s, ex) => s + ex.sets, 0) + setIdx;
   const sessionProgress = (completedSets / TOTAL_SETS) * 100;
 
   const last = getLastWeight(history, current.name);
@@ -491,8 +557,12 @@ export default function App() {
       </div>
 
       <div style={{ paddingTop: 56 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 32 }}>
-          <span style={{ color: C.muted, fontFamily: C.mono, fontSize: 11, letterSpacing: 3 }}>{exIdx + 1} / {WORKOUT.length}</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
+          <span style={{ color: C.muted, fontFamily: C.mono, fontSize: 11, letterSpacing: 3 }}>{exIdx + 1} / {workoutList.length}</span>
+          <button onClick={() => setReorderMode(true)} style={{
+            background: "transparent", border: "none", color: C.muted, cursor: "pointer",
+            fontFamily: C.mono, fontSize: 10, letterSpacing: 2, padding: 0,
+          }}>↕ REORDER</button>
           <span style={{ color: C.accent, fontFamily: C.mono, fontSize: 11, letterSpacing: 3 }}>{current.muscle}</span>
         </div>
 
