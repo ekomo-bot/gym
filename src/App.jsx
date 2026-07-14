@@ -1,7 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
+const INCREMENT_KG = 2;
+const WEIGHTS_KEY = "scgym:weights:v2";
+const DEFAULT_WEIGHTS = {
+  goblet_squat:     0,
+  db_rdl:           14,
+  db_bench:         14,
+  cable_seated_row: 20,
+  lat_pulldown:     20,
+  db_lateral_raise: 14,
+  face_pull_cable:  15,
+};
+
 const WORKOUT = [
   {
+    id: "goblet_squat",
     name: "GOBLET SQUAT",
     sets: 3, reps: 12, rest: 90,
     muscle: "LEGS",
@@ -16,6 +29,7 @@ const WORKOUT = [
     videoLabel: "Alan Thrall — Goblet Squat",
   },
   {
+    id: "db_rdl",
     name: "DB ROMANIAN DEADLIFT",
     sets: 3, reps: 10, rest: 90,
     muscle: "POSTERIOR CHAIN",
@@ -30,6 +44,7 @@ const WORKOUT = [
     videoLabel: "Jeff Nippard — Romanian Deadlift",
   },
   {
+    id: "db_bench",
     name: "DB BENCH PRESS",
     sets: 3, reps: 12, rest: 90,
     muscle: "CHEST",
@@ -44,6 +59,7 @@ const WORKOUT = [
     videoLabel: "RP — Dumbbell Bench Press",
   },
   {
+    id: "cable_seated_row",
     name: "CABLE SEATED ROW",
     sets: 3, reps: 12, rest: 60,
     muscle: "BACK",
@@ -58,6 +74,7 @@ const WORKOUT = [
     videoLabel: "Mind Pump — Seated Cable Row",
   },
   {
+    id: "lat_pulldown",
     name: "LAT PULLDOWN",
     sets: 3, reps: 12, rest: 60,
     muscle: "BACK",
@@ -72,6 +89,7 @@ const WORKOUT = [
     videoLabel: "Jeff Nippard — Lat Pulldown",
   },
   {
+    id: "db_lateral_raise",
     name: "DB LATERAL RAISE",
     sets: 3, reps: 15, rest: 60,
     muscle: "SHOULDERS",
@@ -86,6 +104,7 @@ const WORKOUT = [
     videoLabel: "Mike Israetel — Lateral Raise",
   },
   {
+    id: "face_pull_cable",
     name: "FACE PULL (CABLE)",
     sets: 3, reps: 15, rest: 60,
     muscle: "SHOULDERS",
@@ -166,6 +185,21 @@ export default function App() {
   });
   const [currentSession, setCurrentSession] = useState({});
   const [weightInput, setWeightInput] = useState(0);
+  const [workingWeights, setWorkingWeights] = useState(() => {
+    try {
+      const raw = localStorage.getItem(WEIGHTS_KEY);
+      const saved = raw ? JSON.parse(raw) : {};
+      const result = {};
+      for (const ex of WORKOUT) {
+        result[ex.id] = saved[ex.id]?.weight ?? DEFAULT_WEIGHTS[ex.id] ?? 0;
+      }
+      return result;
+    } catch {
+      const result = {};
+      for (const ex of WORKOUT) result[ex.id] = DEFAULT_WEIGHTS[ex.id] ?? 0;
+      return result;
+    }
+  });
   const timerRef = useRef(null);
   const current = WORKOUT[exIdx];
 
@@ -196,7 +230,7 @@ export default function App() {
   }, [phase, exIdx, setIdx, restTotal, advance]);
 
   const completeSet = () => {
-    setWeightInput(getLastWeight(history, current.name) ?? 0);
+    setWeightInput(workingWeights[current.id] ?? 0);
     setPhase("weight");
   };
 
@@ -222,6 +256,22 @@ export default function App() {
           exercises: currentSession,
         }],
       });
+
+      const nextStored = {};
+      const nextFlat = {};
+      for (const ex of WORKOUT) {
+        const logged = currentSession[ex.name] ?? [];
+        const allMaxed =
+          logged.length === ex.sets &&
+          logged.every(s => s.reps >= ex.reps);
+        const next = allMaxed
+          ? (workingWeights[ex.id] ?? 0) + INCREMENT_KG
+          : (workingWeights[ex.id] ?? 0);
+        nextStored[ex.id] = { weight: next };
+        nextFlat[ex.id] = next;
+      }
+      localStorage.setItem(WEIGHTS_KEY, JSON.stringify(nextStored));
+      setWorkingWeights(nextFlat);
     }
     setCurrentSession({});
     setWeightInput(0);
@@ -289,7 +339,7 @@ export default function App() {
         <input id="import-file" type="file" accept=".json" onChange={importHistory} style={{ display: "none" }} />
       </div>
 
-      <div style={{ color: C.accent, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 20 }}>SIGNAL CULT / PHASE 1</div>
+      <div style={{ color: C.accent, fontFamily: C.mono, fontSize: 10, letterSpacing: 5, marginBottom: 20 }}>SIGNAL CULT / PHASE 2</div>
       <h1 style={{ fontSize: 80, fontWeight: 900, lineHeight: 0.88, marginBottom: 8 }}>FULL<br />BODY</h1>
       <div style={{ color: C.muted, fontSize: 18, marginBottom: 48, fontWeight: 500 }}>MON · WED · FRI</div>
       <div style={{ borderTop: `1px solid ${C.border}`, marginBottom: 40 }}>
@@ -303,8 +353,8 @@ export default function App() {
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, padding: "16px 20px", marginBottom: 32, display: "flex", gap: 14, alignItems: "flex-start" }}>
         <div style={{ color: C.accent, fontSize: 20, marginTop: 3 }}>→</div>
         <div>
-          <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: 3, color: C.muted, marginBottom: 4 }}>WEEKS 1–2</div>
-          <div style={{ fontSize: 15, color: C.text, lineHeight: 1.5 }}>Go embarrassingly light. Complete all 21 sets with clean form.</div>
+          <div style={{ fontFamily: C.mono, fontSize: 10, letterSpacing: 3, color: C.muted, marginBottom: 4 }}>PROGRESSION</div>
+          <div style={{ fontSize: 15, color: C.text, lineHeight: 1.5 }}>Hit all reps at your weight → +{INCREMENT_KG}kg next session. Miss any → repeat the weight.</div>
         </div>
       </div>
       <Btn onClick={() => setPhase("warmup")}>BEGIN SESSION</Btn>
